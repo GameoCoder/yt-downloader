@@ -49,7 +49,10 @@ def main_download():
     global TITLE
     global FROM_EXT
     global TO_EXT
-    if(CONST == "1"):
+    if(CONST >= "1"):
+        if(FROM_EXT == "" or TO_EXT == ""):
+            alert_box("Please Enter Valid extensions")
+            return
         CONST="0"
         print(FROM_EXT + " and " + TO_EXT)
         if(FROM_EXT=="video"):
