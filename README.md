@@ -59,6 +59,8 @@ sudo apt install ffmpeg
    ```
    Enter the Youtube Music URL: https://music.youtube.com/watch?v=your-video-id
    ```
+### This script also supports Playlist Links. Example Playlist Link -
+   ```https://music.youtube.com/playlist?list=unique-id```
 
 5. The script will download the best available video and audio streams, merge them, and save the file in the current directory.
 
