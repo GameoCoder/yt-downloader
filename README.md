@@ -59,10 +59,45 @@ sudo apt install ffmpeg
    ```
    Enter the Youtube Music URL: https://music.youtube.com/watch?v=your-video-id
    ```
-### This script also supports Playlist Links. Example Playlist Link -
-   ```https://music.youtube.com/playlist?list=unique-id```
 
 5. The script will download the best available video and audio streams, merge them, and save the file in the current directory.
+
+## For Playlists
+   1. Run the script:
+      ```
+      python download_video.py
+      ```
+   2. Select the "Auto Detect" method when prompted:
+      ```
+      Methods Available:-
+      1) Auto Detect
+      2) Download Youtube Video
+      3) Download Youtube Music
+      4) Advanced Options
+
+      Your Choice: 1
+      ```
+   3. Enter the playlist URL, when prompted:
+      ```
+      Enter the URL: https://music.youtube.com/playlist?list=your-playlist-id
+      ```
+   4. Enter serial numbers of videos to be downloaded, or "**all**" to download all:
+      ```
+      Available Music to download:  5
+
+      Select songs to download:
+      1. Test Video 1 (https://music.youtube.com/watch?v=test-video-1)
+      2. Test Video 2 (https://music.youtube.com/watch?v=test-video-2)
+      3. Test Video 3 (https://music.youtube.com/watch?v=test-video-3)
+      4. Test Video 4 (https://music.youtube.com/watch?v=test-video-4)
+      5. Test Video 5 (https://music.youtube.com/watch?v=test-video-5)
+
+      Enter song numbers (space-separated), or 'all' to download all:  
+      ```
+   5. Sit back and relax until your selected videos have been downloaded.
+      <p>The downloads are multi-threaded, so it would be pretty fast.</p>
+> Note: Youtube Music playlist links will ***only*** download files as mp3.
+
 
 ## Example Output
 
