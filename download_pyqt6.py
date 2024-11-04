@@ -17,6 +17,20 @@ video_info = {}
 extensions = {}
 ERROR = False
 
+ydl_opts = {
+    'format': 'best',
+    'outtmpl': '%(title)s.%(ext)s',
+    'quiet': True,
+}
+
+def update_options(**kwargs):
+    global ydl_opts
+    for key, value in kwargs.items():
+        if value is None:
+            ydl_opts.pop(key, None)
+        else:
+            ydl_opts[key] = value
+
 class DownloadWorker(QThread):
     progress_update=pyqtSignal(str,int)
     download_complete=pyqtSignal()
@@ -44,11 +58,14 @@ class DownloadWorker(QThread):
             self.download_complete.emit()
 
     def download_video_with_progress(self, title, url, ext):
-        ydl_opts = {
-            'format': 'best',
-            'outtmpl': f"{title}.{ext}",
-            'progress_hooks': [lambda d: self.update_progress(d,title)]
-        }
+        #ydl_opts = {
+        #    'format': 'best',
+        #    'outtmpl': f"{title}.{ext}",
+        #    'progress_hooks': [lambda d: self.update_progress(d,title)]
+        #}
+        global ydl_opts
+        ydl_opts.clear()
+        update_options(format='best',outtmpl=f'{title}.{ext}',progress_hooks=[lambda d: self.update_progress(d,title)], no_warnings=False)
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             try:
                 ydl.download([url])
@@ -65,7 +82,6 @@ class DownloadWorker(QThread):
 
             if total_size:
                 percent = (downloaded_size / total_size) * 100
-                print(f"Update progress for {title}: {percent}%")
                 self.progress_update.emit(title, int(percent))
     
     def log_error(self, message):
@@ -77,8 +93,6 @@ class DownloadWorker(QThread):
 
         with open(log_filename, 'a') as log_file:
             log_file.write(f"{datetime.now()}: {message}\n")
-
-
 
 class ResultWindow(QWidget):
     def __init__(self,results):
@@ -190,11 +204,9 @@ class MainWindow(QMainWindow):
             url=URL
         
         if "playlist" in url or "list" in url:
-            ydl_opts = {
-                'quiet': True,
-                'force-generic-extractor':True,
-                'extract_flat': True
-            }
+            global ydl_opts
+            ydl_opts.clear()
+            update_options(force_generic_extractor=True, extract_flat=True, quiet=True, no_warnings=True)
 
             try:
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -227,7 +239,6 @@ class MainWindow(QMainWindow):
                     self.downloadButton.show()
                     self.downloadText.show()
                     self.downloadText.setText("Title - "+info['title'])
-                    #TODO - Show progressbar when self.downloadbutton is clicked
             except Exception as e:
                 print(f"Error Occurred: {e}")
 
