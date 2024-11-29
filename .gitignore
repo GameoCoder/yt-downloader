@@ -1,2 +1,6 @@
-
 *.pyc
+.clang-format
+.clangd
+.clang-tidy
+*.mp3
+*.mp4

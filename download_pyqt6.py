@@ -1,21 +1,23 @@
 import sys
 import os
 import yt_dlp
+import requests
 from datetime import datetime
 from PyQt6.QtWidgets import (
-    QApplication, QMainWindow, QPushButton, QProgressBar, QLabel, QLineEdit, 
-    QMessageBox, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget, QHBoxLayout, QToolButton
+    QApplication, QMainWindow, QPushButton, QProgressBar, QLabel, QLineEdit, QSlider, QCheckBox, QComboBox, QDoubleSpinBox,
+    QMessageBox, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget, QHBoxLayout, QToolButton, QSpinBox, QGraphicsView, QTextEdit
 )
-from PyQt6 import uic
-from PyQt6.QtGui import QClipboard
+from PyQt6 import uic, QtWidgets
+from PyQt6.QtGui import QClipboard, QPixmap, QImage
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from io import BytesIO
 
 
 URL = "https://music.youtube.com/playlist?list=PLyZ03ihN5GIBiumzB0iyEGCENBidy5I0V"
 video_info = {}
 extensions = {}
 ERROR = False
+thumbnail_url = ""
 
 ydl_opts = {
     'format': 'best',
@@ -30,6 +32,75 @@ def update_options(**kwargs):
             ydl_opts.pop(key, None)
         else:
             ydl_opts[key] = value
+
+class AdvancedWindow(QWidget):
+    def __init__(self):
+        super().__init__()
+        if hasattr(sys,'_MEIPASS'):
+            ui_file=os.path.join(sys._MEIPASS, 'advanced.ui')
+        else:
+            ui_file='advanced.ui'
+        uic.loadUi(ui_file,self)
+        global ydl_opts
+        ydl_opts.clear()
+        #Quality Control
+        self.qSlider = self.findChild(QSlider, 'qSlider')
+        self.qSliderLabel = self.findChild(QLabel, 'qSliderLabel')
+
+        #Checkboxes
+        self.checkVerbose = self.findChild(QCheckBox, 'checkVerbose')
+        self.checkSubtitle = self.findChild(QCheckBox, 'checkSubtitles')
+        self.checkMetadata = self.findChild(QCheckBox, 'checkMetadata')
+
+        #Extension
+        self.extensionBox = self.findChild(QComboBox, 'extensionBox')
+
+        #Retry Box
+        self.retryBox = self.findChild(QSpinBox, 'retryBox')
+
+        #Rate Limiter
+        self.checkRate = self.findChild(QCheckBox, 'checkRate')
+        self.rateLimiterBox = self.findChild(QDoubleSpinBox, 'rateLimiterBox')
+        self.rateLimiterBox.hide()
+        #TODO -> Rate LImiter doesnt work
+
+        #Thumbnail View
+        self.graphicsView = self.findChild(QGraphicsView, 'graphicsView')
+
+
+        #Confirm n Reset
+        self.pushConfirm = self.findChild(QPushButton, 'pushConfirm')
+        self.pushReset = self.findChild(QPushButton, 'pushReset')
+        self.pushConfirm.clicked.connect(self.confirm)
+
+        self.qSlider.valueChanged.connect(self.update_slider_label)
+
+        #Fetch Thumbnail
+        global thumbnail_url
+        image_data = BytesIO(requests.get(thumbnail_url).content)
+        image=QImage()
+        image.loadFromData(image_data.getvalue())
+        pixmap = QPixmap.fromImage(image)
+        view_size = self.graphicsView.size()
+        scaled_pixed = pixmap.scaled(view_size,Qt.AspectRatioMode.IgnoreAspectRatio, Qt.TransformationMode.SmoothTransformation)
+        scene=QtWidgets.QGraphicsScene()
+        scene.addPixmap(scaled_pixed)
+        self.graphicsView.setScene(scene)
+
+    def confirm(self):
+        #Print all the values
+        current_quality = self.qSliderLabel.text()
+        print(f"Selected Quality: {current_quality}")
+        current_retries = self.retryBox.value()
+        print(f"Selected number of retries: {current_retries}")
+        current_ext = self.extensionBox.currentText()
+        print(f"Selected Extension: {current_ext}\n")
+
+    def update_slider_label(self):
+        current_value = self.qSlider.value()
+        labels = ["Worst", "Good", "Better", "Best"]
+        index = current_value // 25
+        self.qSliderLabel.setText(labels[index])
 
 class DownloadWorker(QThread):
     progress_update=pyqtSignal(str,int)
@@ -184,14 +255,21 @@ class MainWindow(QMainWindow):
         self.downloadButton = self.findChild(QPushButton, 'downloadButton')
         self.searchButton = self.findChild(QPushButton, 'searchButton')
         self.toolButton = self.findChild(QToolButton, 'toolButton')
+        ##TODO - Remove after debug
+        self.entry.setText("https://www.youtube.com/watch?v=6rO6uRUrqwY")
         self.downloadText.hide()
         self.downloadButton.hide()
         self.progressBar.hide()
         self.toolButton.hide()
 
+        self.toolButton.clicked.connect(self.advanced)
         self.pasteButton.clicked.connect(self.paste_from_clipboard)
         self.downloadButton.clicked.connect(self.download_videos)
         self.searchButton.clicked.connect(self.search_video)
+
+    def advanced(self):
+        self.new_window = AdvancedWindow()
+        self.new_window.show()
 
     def search_video(self):
         url=self.entry.text()
@@ -223,21 +301,20 @@ class MainWindow(QMainWindow):
             except Exception as e:
                 print(f"Error Occurred: {e}")
         else:
-            pass
-            ydl_opts = {
-                'quiet': False,
-                'force-generic-extractor': True,
-                'extract_flat':True
-            }
+            global thumbnail_url
+            ydl_opts.clear()
+            update_options(quiet=False,force_generic_extractor=True,extract_flat=True)
 
             try:
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                     info=ydl.extract_info(url,download=False)
+                    thumbnail_url = info.get('thumbnail')
                     extensions[info['title']] = "music" not in url
                     video_info={info['title']: info['id']}
                     print(video_info)
                     self.downloadButton.show()
                     self.downloadText.show()
+                    self.toolButton.show()
                     self.downloadText.setText("Title - "+info['title'])
             except Exception as e:
                 print(f"Error Occurred: {e}")

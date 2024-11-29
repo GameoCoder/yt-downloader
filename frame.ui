@@ -7,7 +7,7 @@
     <x>0</x>
     <y>0</y>
     <width>694</width>
-    <height>268</height>
+    <height>313</height>
    </rect>
   </property>
   <property name="windowTitle">
@@ -28,7 +28,7 @@
     <property name="geometry">
      <rect>
       <x>480</x>
-      <y>30</y>
+      <y>20</y>
       <width>191</width>
       <height>61</height>
      </rect>
@@ -76,8 +76,8 @@
     <property name="geometry">
      <rect>
       <x>30</x>
-      <y>190</y>
-      <width>351</width>
+      <y>230</y>
+      <width>641</width>
       <height>16</height>
      </rect>
     </property>
@@ -103,12 +103,18 @@
      <rect>
       <x>30</x>
       <y>170</y>
-      <width>421</width>
-      <height>16</height>
+      <width>301</width>
+      <height>41</height>
      </rect>
     </property>
     <property name="text">
      <string>Downloading</string>
+    </property>
+    <property name="alignment">
+     <set>Qt::AlignmentFlag::AlignLeading|Qt::AlignmentFlag::AlignLeft|Qt::AlignmentFlag::AlignVCenter</set>
+    </property>
+    <property name="wordWrap">
+     <bool>true</bool>
     </property>
    </widget>
    <widget class="QLabel" name="support_links">
@@ -127,14 +133,20 @@
    <widget class="QToolButton" name="toolButton">
     <property name="geometry">
      <rect>
-      <x>390</x>
+      <x>340</x>
       <y>170</y>
-      <width>61</width>
+      <width>111</width>
       <height>41</height>
      </rect>
     </property>
+    <property name="whatsThis">
+     <string>Advanced Options for downloading your current video or music</string>
+    </property>
+    <property name="layoutDirection">
+     <enum>Qt::LayoutDirection::LeftToRight</enum>
+    </property>
     <property name="text">
-     <string>...</string>
+     <string>Advanced Options</string>
     </property>
    </widget>
   </widget>
