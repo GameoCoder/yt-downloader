@@ -89,7 +89,6 @@ class AdvancedWindow(QWidget):
         self.graphicsView.setScene(scene)
 
     def confirm(self):
-        #Print all the values
         current_quality = self.qSliderLabel.text()
         print(f"Selected Quality: {current_quality}")
         current_retries = self.retryBox.value()
@@ -107,10 +106,11 @@ class DownloadWorker(QThread):
     progress_update=pyqtSignal(str,int)
     download_complete=pyqtSignal()
 
-    def __init__(self,selected_videos,logger_var):
+    def __init__(self,selected_videos,logger_var=None):
         super().__init__()
         self.selected_videos = selected_videos
-        self.logger_var2 = logger_var
+        if logger_var != None:
+            self.logger_var2 = logger_var
 
     def run(self):
         global extensions
@@ -137,7 +137,10 @@ class DownloadWorker(QThread):
         #}
         global ydl_opts
         ydl_opts.clear()
-        update_options(format='best',outtmpl=f'{title}.{ext}',progress_hooks=[lambda d: self.update_progress(d,title)], no_warnings=False, logger=self.logger_var2)
+        try:
+            update_options(format='best',outtmpl=f'{title}.{ext}',progress_hooks=[lambda d: self.update_progress(d,title)], no_warnings=False, logger=self.logger_var2)
+        except Exception:
+            update_options(format='best',outtmpl=f'{title}.{ext}',progress_hooks=[lambda d: self.update_progress(d,title)], no_warnings=False)
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             try:
                 ydl.download([url])
@@ -164,7 +167,7 @@ class DownloadWorker(QThread):
         log_filename = os.path.join(logs_directory, f"error_{timestamp}.txt")
 
         with open(log_filename, 'a') as log_file:
-            log_file.write(f"{datetime.now()}: {message}\n")
+            log_file.write(f"{message}\n Timestamp-{datetime.now()}\n")
 
 class Logger(QObject):
     messageSignal=pyqtSignal(str)
@@ -182,38 +185,60 @@ class ResultWindow(QWidget):
     def __init__(self,results):
         super().__init__()
         self.setWindowTitle("Search Results")
-        self.setGeometry(100,100,400,600)
+        self.setGeometry(100,100,600,700)
         layout=QVBoxLayout(self)
         self.table = QTableWidget()
-        self.table.setColumnCount(4)
-        self.table.setHorizontalHeaderLabels(['Select','Title','Extension','Progress'])
+        self.table.setColumnCount(5)
+        self.table.setHorizontalHeaderLabels(['','Title','Extension','Progress','Remarks'])
         self.table.setRowCount(len(results))
         self.progress_bars = {}
+        self.loggers = {}
         for row, (title, ext) in enumerate(results):
+            #CheckBox Item Setup
             checkbox_item = QTableWidgetItem()
             checkbox_item.setFlags(checkbox_item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
             checkbox_item.setCheckState(Qt.CheckState.Unchecked)
-            checkbox_item.setTextAlignment(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignVCenter)
             self.table.setItem(row, 0, checkbox_item)
+            self.table.item(row, 0).setFlags(self.table.item(row, 0).flags() & ~Qt.ItemFlag.ItemIsEditable)
+
+            #Title Item Setup
             self.table.setItem(row, 1, QTableWidgetItem(title))
+            self.table.item(row, 1).setFlags(self.table.item(row, 1).flags() & ~Qt.ItemFlag.ItemIsEditable)
+
+            #Toggle Button Setup
             toggle_button = QPushButton('Video (mp4)')
             toggle_button.setCheckable(True)
             extensions[title]=True
             toggle_button.clicked.connect(lambda checked, btn=toggle_button, r=row: self.toggle_value(btn,r))
             self.table.setCellWidget(row, 2, toggle_button)
+
+            #Progress Bars Setup
             progress_bar=QProgressBar()
             progress_bar.setValue(0)
-            self.table.setCellWidget(row, 3, progress_bar)
             self.progress_bars[title]=progress_bar
+            self.table.setCellWidget(row, 3, progress_bar)
+
+            #Logger Setup
+            logger = QTextEdit()
+            logger.setReadOnly(True)
+            self.loggers[title]=logger
+            self.table.setCellWidget(row, 4, logger)
         self.logger = QTextEdit()
         self.logger.setReadOnly(True)
         self.downloadButtonPlayList = QPushButton("Download Selected")
         self.downloadButtonPlayList.clicked.connect(self.search_and_download)
+
+        #Table Config
         self.table.setAlternatingRowColors(True)
+        self.table.setColumnWidth(0,25)
+        self.table.setColumnWidth(1,200)
+        self.table.setColumnWidth(2,100)
+        self.table.setColumnWidth(3,75)
+        self.table.setColumnWidth(4,200)
         layout.addWidget(self.table)
         layout.addWidget(self.downloadButtonPlayList)
         layout.addWidget(self.logger)
-        self.logger.setFixedSize(400,35)
+        self.logger.setFixedHeight(50)
         self.setLayout(layout)
 
     def toggle_value(self,button,row):
@@ -228,20 +253,22 @@ class ResultWindow(QWidget):
 
     def search_and_download(self):
         global video_info
-        selected_videos=[]
+        self.selected_videos={}
         for row in range(self.table.rowCount()):
             checkbox_item=self.table.item(row,0)
             if checkbox_item and checkbox_item.checkState()==Qt.CheckState.Checked:
                 title=self.table.item(row,1).text()
                 url=video_info.get(title)
                 if url:
-                    selected_videos.append((title,url))
+                    self.selected_videos[title]=url
+                    self.loggers[title].clear()
+                    self.loggers[title].insertPlainText('Waiting To Dowload')
 
-        if not selected_videos:
+        if not self.selected_videos:
             QMessageBox.warning(self,"Download Error","No Videos selected to Download")
         self.logger_var=Logger()
         self.logger_var.messageSignal.connect(self.logger.append)
-        self.worker=DownloadWorker(selected_videos,self.logger_var)
+        self.worker=DownloadWorker(self.selected_videos,self.logger_var)
         self.worker.progress_update.connect(self.update_progress)
         self.worker.download_complete.connect(self.on_download_complete)
         self.worker.start()
@@ -249,13 +276,21 @@ class ResultWindow(QWidget):
     def update_progress(self,title,percent):
         if title in self.progress_bars:
             self.progress_bars[title].setValue(percent)
+            if percent >= 0:
+                self.loggers[title].clear()
+                self.loggers[title].insertPlainText('Downloading...')
 
     def on_download_complete(self):
         global ERROR
         if(ERROR == False):
-            QMessageBox.information(self,"Download Complete", "All Videos have been downloaded")
+            QMessageBox.information(self,"Download Complete", "All Video/Audio files have been downloaded")
+            for title in self.progress_bars:
+                if self.selected_videos.get(title) is not None:
+                    self.progress_bars[title].setValue(0)
+                    self.loggers[title].clear()
+                    self.loggers[title].insertPlainText('Downloaded!')
         else:
-            QMessageBox.warning(self,"Error","Some error occurred while downloading file/s.\nPlease check logs")
+            QMessageBox.warning(self,"Error","Files not downloaded have some error.\nLogs Created at logs/error______.txt")
 
 
 class MainWindow(QMainWindow):
@@ -274,8 +309,8 @@ class MainWindow(QMainWindow):
         self.searchButton = self.findChild(QPushButton, 'searchButton')
         self.toolButton = self.findChild(QToolButton, 'toolButton')
         ##TODO - Remove after debug
-        #self.entry.setText("https://www.youtube.com/watch?v=6rO6uRUrqwY")
-        self.entry.setText(URL)
+        self.entry.setText("https://www.youtube.com/watch?v=6rO6uRUrqwY")
+        #self.entry.setText(URL)
         self.downloadText.hide()
         self.downloadButton.hide()
         self.progressBar.hide()
