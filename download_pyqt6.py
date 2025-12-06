@@ -6,17 +6,16 @@ from datetime import datetime
 from ffmpeg import ensure_ffmpeg_ready
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QPushButton, QProgressBar, QLabel, QLineEdit, QSlider, QCheckBox, QComboBox, QDoubleSpinBox,
-    QMessageBox, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget, QHBoxLayout, QToolButton, QSpinBox, QGraphicsView, QTextEdit
+    QMessageBox, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget, QToolButton, QSpinBox, QGraphicsView, QTextEdit
 )
 from PyQt6 import uic, QtWidgets
-from PyQt6.QtGui import QClipboard, QPixmap, QImage
+from PyQt6.QtGui import QPixmap
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QObject, QTimer
-from io import BytesIO
 import re
 import time
 
 
-URL = "https://youtu.be/njX2bu-_Vw4?si=DpqFGMkWUOU56A5g"  #DEBUG - Remove in production
+URL = "https://youtu.be/jZhjqMMV1B4?si=QeTmdVjiTt-_xnuo"
 video_info = {}
 extensions = {}
 ERROR = False
@@ -36,6 +35,21 @@ def update_options(**kwargs):
         else:
             ydl_opts[key] = value
 
+class ImageDownloader(QThread):
+    image_downloaded = pyqtSignal(bytes)
+
+    def __init__(self, url, parent=None):
+        super().__init__(parent)
+        self.url = url
+
+    def run(self):
+        try:
+            response = requests.get(self.url)
+            response.raise_for_status()
+            self.image_downloaded.emit(response.content)
+        except requests.exceptions.RequestException as e:
+            print(f"Error downloading image: {e}")
+
 class AdvancedWindow(QWidget):
     def __init__(self):
         super().__init__()
@@ -48,54 +62,73 @@ class AdvancedWindow(QWidget):
         ydl_opts.clear()
         self.qSlider = self.findChild(QSlider, 'qSlider')
         self.qSliderLabel = self.findChild(QLabel, 'qSliderLabel')
-
         self.checkVerbose = self.findChild(QCheckBox, 'checkVerbose')
         self.checkSubtitle = self.findChild(QCheckBox, 'checkSubtitles')
         self.checkMetadata = self.findChild(QCheckBox, 'checkMetadata')
-
         self.extensionBox = self.findChild(QComboBox, 'extensionBox')
         self.retryBox = self.findChild(QSpinBox, 'retryBox')
         self.checkRate = self.findChild(QCheckBox, 'checkRate')
         self.rateLimiterBox = self.findChild(QDoubleSpinBox, 'rateLimiterBox')
-        self.rateLimiterBox.hide()
-        #TODO -> Rate LImiter doesnt work
         self.graphicsView = self.findChild(QGraphicsView, 'graphicsView')
         self.pushConfirm = self.findChild(QPushButton, 'pushConfirm')
         self.pushReset = self.findChild(QPushButton, 'pushReset')
         self.pushConfirm.clicked.connect(self.confirm)
+        self.pushReset.clicked.connect(self.close)
+
+        self.scene = QtWidgets.QGraphicsScene(self)
+        self.graphicsView.setScene(self.scene)
 
         self.qSlider.valueChanged.connect(self.update_slider_label)
 
-        #Fetch Thumbnail
         global thumbnail_url
-        image_data = BytesIO(requests.get(thumbnail_url).content)
-        image=QImage()
-        image.loadFromData(image_data.getvalue())
-        pixmap = QPixmap.fromImage(image)
-        view_size = self.graphicsView.size()
-        scaled_pixed = pixmap.scaled(view_size,Qt.AspectRatioMode.IgnoreAspectRatio, Qt.TransformationMode.SmoothTransformation)
-        scene=QtWidgets.QGraphicsScene()
-        scene.addPixmap(scaled_pixed)
-        self.graphicsView.setScene(scene)
+        if thumbnail_url:
+            self.image_downloader = ImageDownloader(thumbnail_url)
+            self.image_downloader.image_downloaded.connect(self.set_image)
+            self.image_downloader.start()
+
+    def set_image(self, image_data):
+        pixmap = QPixmap()
+        pixmap.loadFromData(image_data)
+        self.scene.addPixmap(pixmap)
+        self.graphicsView.fitInView(self.scene.itemsBoundingRect(), Qt.AspectRatioMode.KeepAspectRatio)
 
     def confirm(self):
-        current_quality = self.qSliderLabel.text()
-        print(f"Selected Quality: {current_quality}")
-        current_retries = self.retryBox.value()
-        print(f"Selected number of retries: {current_retries}")
-        current_ext = self.extensionBox.currentText()
-        print(f"Selected Extension: {current_ext}\n")
+        val = self.qSlider.value()
+    
+        if val >= 75:
+            fmt = 'bestvideo+bestaudio/best'
+        elif val >= 50:
+            fmt = 'bestvideo[height<=1080]+bestaudio/best[height<=1080]'
+        elif val >= 25:
+            fmt = 'bestvideo[height<=720]+bestaudio/best[height<=720]'
+        else:
+            fmt = 'bestvideo[height<=360]+bestaudio/best[height<=360]'
+
+        new_opts = {
+            'format': fmt,
+            'retries': self.retryBox.value(),
+            'merge_output_format': self.extensionBox.currentText(),
+        }
+        if self.checkSubtitle.isChecked():
+            new_opts.update({
+                'writesubtitles': True,
+                'writeautomaticsub': True,
+                'subtitlesformat': 'srt/best',
+                'subtitleslangs': ['en']
+            })
+        update_options(**new_opts)
+        self.close()
 
     def update_slider_label(self):
         current_value = self.qSlider.value()
-        labels = ["Worst", "Good", "Better", "Best"]
+        labels = ["<=360p", "720p", "1080p", "Best"]
         index = current_value // 25
         self.qSliderLabel.setText(labels[index])
 
 class DownloadWorker(QThread):
     progress_update=pyqtSignal(str,int)
     download_complete=pyqtSignal()
-    sleep_for_item = pyqtSignal(str, int) # New signal: title, duration
+    sleep_for_item = pyqtSignal(str, int)
 
     def __init__(self,selected_videos,logger_var=None):
         super().__init__()
@@ -113,7 +146,7 @@ class DownloadWorker(QThread):
         global extensions
         try:
             for title,url in self.selected_videos:
-                self.current_download_title = title # Set the current title
+                self.current_download_title = title
                 ext="mp4"
                 if extensions[title]==False:
                     ext="mp3"
@@ -129,12 +162,11 @@ class DownloadWorker(QThread):
 
     def download_video_with_progress(self, title, url, ext):
         global ydl_opts
-        ydl_opts.clear()
         ffmpeg_args = {'ffmpeg_location': './ffmpeg'} if sys.platform == "win32" else {}
         try:
-            update_options(format='bestvideo+bestaudio/best',outtmpl=f'{title}.{ext}',progress_hooks=[lambda d: self.update_progress(d,title)], no_warnings=False, logger=self.logger_var2, **ffmpeg_args)
+            update_options(outtmpl=f'{title}.{ext}',progress_hooks=[lambda d: self.update_progress(d,title)], no_warnings=False, logger=self.logger_var2, **ffmpeg_args)
         except Exception:
-            update_options(format='bestvideo+bestaudio/best',outtmpl=f'{title}.{ext}',progress_hooks=[lambda d: self.update_progress(d,title)], no_warnings=False, **ffmpeg_args)
+            update_options(outtmpl=f'{title}.{ext}',progress_hooks=[lambda d: self.update_progress(d,title)], no_warnings=False, **ffmpeg_args)
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             try:
                 ydl.download([url])
@@ -174,7 +206,7 @@ class DownloadWorker(QThread):
 
 class Logger(QObject):
     messageSignal=pyqtSignal(str)
-    sleep_detected = pyqtSignal(str, int) # New signal: title, duration
+    sleep_detected = pyqtSignal(str, int)
 
     def debug(self,msg):
         self.messageSignal.emit(msg)
@@ -192,8 +224,8 @@ class Logger(QObject):
         match = re.search(r"^\[download\] Sleeping (\d+\.?\d*) seconds as required by the site\.\.\.", msg)
         if match:
             duration = int(float(match.group(1)))
-            # We'll use a placeholder for now, actual title will be handled in DownloadWorker
             self.sleep_detected.emit("GLOBAL_SLEEP", duration)
+
 class ResultWindow(QWidget):
     def __init__(self,results):
         super().__init__()
@@ -209,31 +241,26 @@ class ResultWindow(QWidget):
         self.sleep_timers = {}
         self.current_sleep_durations = {}
         for row, (title, ext) in enumerate(results):
-            #CheckBox Item Setup
             checkbox_item = QTableWidgetItem()
             checkbox_item.setFlags(checkbox_item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
             checkbox_item.setCheckState(Qt.CheckState.Unchecked)
             self.table.setItem(row, 0, checkbox_item)
             self.table.item(row, 0).setFlags(self.table.item(row, 0).flags() & ~Qt.ItemFlag.ItemIsEditable)
 
-            #Title Item Setup
             self.table.setItem(row, 1, QTableWidgetItem(title))
             self.table.item(row, 1).setFlags(self.table.item(row, 1).flags() & ~Qt.ItemFlag.ItemIsEditable)
 
-            #Toggle Button Setup
             toggle_button = QPushButton('Video (mp4)')
             toggle_button.setCheckable(True)
             extensions[title]=True
             toggle_button.clicked.connect(lambda checked, btn=toggle_button, r=row: self.toggle_value(btn,r))
             self.table.setCellWidget(row, 2, toggle_button)
 
-            #Progress Bars Setup
             progress_bar=QProgressBar()
             progress_bar.setValue(0)
             self.progress_bars[title]=progress_bar
             self.table.setCellWidget(row, 3, progress_bar)
 
-            #Logger Setup
             logger = QTextEdit()
             logger.setReadOnly(True)
             self.loggers[title]=logger
@@ -243,7 +270,6 @@ class ResultWindow(QWidget):
         self.downloadButtonPlayList = QPushButton("Download Selected")
         self.downloadButtonPlayList.clicked.connect(self.search_and_download)
 
-        #Table Config
         self.table.setAlternatingRowColors(True)
         self.table.setColumnWidth(0,25)
         self.table.setColumnWidth(1,200)
@@ -286,7 +312,7 @@ class ResultWindow(QWidget):
         self.worker=DownloadWorker(self.selected_videos,self.logger_var)
         self.worker.progress_update.connect(self.update_progress)
         self.worker.download_complete.connect(self.on_download_complete)
-        self.worker.sleep_for_item.connect(self.handle_sleep_countdown) # Connect new signal
+        self.worker.sleep_for_item.connect(self.handle_sleep_countdown)
         self.worker.start()
 
     def handle_sleep_countdown(self, title, duration):
@@ -299,14 +325,14 @@ class ResultWindow(QWidget):
         logger = self.loggers.get(title)
         if progress_bar and logger:
             progress_bar.setMaximum(duration)
-            progress_bar.setValue(duration) # Start at max for reverse progress
+            progress_bar.setValue(duration)
             logger.clear()
             logger.insertPlainText(f"Sleeping {duration} seconds...")
 
             self.current_sleep_durations[title] = duration
             timer = QTimer(self)
-            timer.timeout.connect(lambda: self._update_sleep_progress(title)) # Use lambda to pass title
-            timer.start(1000) # Update every second
+            timer.timeout.connect(lambda: self._update_sleep_progress(title))
+            timer.start(1000)
             self.sleep_timers[title] = timer
 
     def _update_sleep_progress(self, title):
@@ -326,16 +352,16 @@ class ResultWindow(QWidget):
                     self.sleep_timers[title].stop()
                     del self.sleep_timers[title]
                     del self.current_sleep_durations[title]
-                    progress_bar.setValue(0) # Reset to 0 after sleep
+                    progress_bar.setValue(0)
                     logger.clear()
-                    logger.insertPlainText('Downloading...') # Or whatever the next status is
+                    logger.insertPlainText('Downloading...')
 
     def update_progress(self,title,percent):
         if title in self.progress_bars:
             self.progress_bars[title].setValue(percent)
             if percent >= 0:
                 self.loggers[title].clear()
-                self.loggers[title].insertPlainText('Downloading...')
+                self.loggers[title].insertPlainText(f"{percent}% Complete")
 
     def on_download_complete(self):
         global ERROR
