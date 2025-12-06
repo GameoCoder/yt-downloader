@@ -132,9 +132,9 @@ class DownloadWorker(QThread):
         ydl_opts.clear()
         ffmpeg_args = {'ffmpeg_location': './ffmpeg'} if sys.platform == "win32" else {}
         try:
-            update_options(format='best',outtmpl=f'{title}.{ext}',progress_hooks=[lambda d: self.update_progress(d,title)], no_warnings=False, logger=self.logger_var2, **ffmpeg_args)
+            update_options(format='bestvideo+bestaudio/best',outtmpl=f'{title}.{ext}',progress_hooks=[lambda d: self.update_progress(d,title)], no_warnings=False, logger=self.logger_var2, **ffmpeg_args)
         except Exception:
-            update_options(format='best',outtmpl=f'{title}.{ext}',progress_hooks=[lambda d: self.update_progress(d,title)], no_warnings=False, **ffmpeg_args)
+            update_options(format='bestvideo+bestaudio/best',outtmpl=f'{title}.{ext}',progress_hooks=[lambda d: self.update_progress(d,title)], no_warnings=False, **ffmpeg_args)
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             try:
                 ydl.download([url])
