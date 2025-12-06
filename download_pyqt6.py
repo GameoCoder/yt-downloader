@@ -3,18 +3,20 @@ import os
 import yt_dlp
 import requests
 from datetime import datetime
+from ffmpeg import ensure_ffmpeg_ready
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QPushButton, QProgressBar, QLabel, QLineEdit, QSlider, QCheckBox, QComboBox, QDoubleSpinBox,
     QMessageBox, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget, QHBoxLayout, QToolButton, QSpinBox, QGraphicsView, QTextEdit
 )
 from PyQt6 import uic, QtWidgets
 from PyQt6.QtGui import QClipboard, QPixmap, QImage
-from PyQt6.QtCore import Qt, QThread, pyqtSignal, QObject
+from PyQt6.QtCore import Qt, QThread, pyqtSignal, QObject, QTimer
 from io import BytesIO
+import re
+import time
 
 
-## GLOBAL VARIABLES
-URL = "https://music.youtube.com/playlist?list=PLyZ03ihN5GIBiumzB0iyEGCENBidy5I0V"  #DEBUG - Remove in production
+URL = "https://youtu.be/njX2bu-_Vw4?si=DpqFGMkWUOU56A5g"  #DEBUG - Remove in production
 video_info = {}
 extensions = {}
 ERROR = False
@@ -44,32 +46,20 @@ class AdvancedWindow(QWidget):
         uic.loadUi(ui_file,self)
         global ydl_opts
         ydl_opts.clear()
-        #Quality Control
         self.qSlider = self.findChild(QSlider, 'qSlider')
         self.qSliderLabel = self.findChild(QLabel, 'qSliderLabel')
 
-        #Checkboxes
         self.checkVerbose = self.findChild(QCheckBox, 'checkVerbose')
         self.checkSubtitle = self.findChild(QCheckBox, 'checkSubtitles')
         self.checkMetadata = self.findChild(QCheckBox, 'checkMetadata')
 
-        #Extension
         self.extensionBox = self.findChild(QComboBox, 'extensionBox')
-
-        #Retry Box
         self.retryBox = self.findChild(QSpinBox, 'retryBox')
-
-        #Rate Limiter
         self.checkRate = self.findChild(QCheckBox, 'checkRate')
         self.rateLimiterBox = self.findChild(QDoubleSpinBox, 'rateLimiterBox')
         self.rateLimiterBox.hide()
         #TODO -> Rate LImiter doesnt work
-
-        #Thumbnail View
         self.graphicsView = self.findChild(QGraphicsView, 'graphicsView')
-
-
-        #Confirm n Reset
         self.pushConfirm = self.findChild(QPushButton, 'pushConfirm')
         self.pushReset = self.findChild(QPushButton, 'pushReset')
         self.pushConfirm.clicked.connect(self.confirm)
@@ -105,17 +95,25 @@ class AdvancedWindow(QWidget):
 class DownloadWorker(QThread):
     progress_update=pyqtSignal(str,int)
     download_complete=pyqtSignal()
+    sleep_for_item = pyqtSignal(str, int) # New signal: title, duration
 
     def __init__(self,selected_videos,logger_var=None):
         super().__init__()
         self.selected_videos = selected_videos
+        self.current_download_title = ""
         if logger_var != None:
             self.logger_var2 = logger_var
+            self.logger_var2.sleep_detected.connect(self._handle_sleep_detection)
+
+    def _handle_sleep_detection(self, placeholder_title, duration):
+        if self.current_download_title:
+            self.sleep_for_item.emit(self.current_download_title, duration)
 
     def run(self):
         global extensions
         try:
             for title,url in self.selected_videos:
+                self.current_download_title = title # Set the current title
                 ext="mp4"
                 if extensions[title]==False:
                     ext="mp3"
@@ -130,17 +128,13 @@ class DownloadWorker(QThread):
             self.download_complete.emit()
 
     def download_video_with_progress(self, title, url, ext):
-        #ydl_opts = {
-        #    'format': 'best',
-        #    'outtmpl': f"{title}.{ext}",
-        #    'progress_hooks': [lambda d: self.update_progress(d,title)]
-        #}
         global ydl_opts
         ydl_opts.clear()
+        ffmpeg_args = {'ffmpeg_location': './ffmpeg'} if sys.platform == "win32" else {}
         try:
-            update_options(format='best',outtmpl=f'{title}.{ext}',progress_hooks=[lambda d: self.update_progress(d,title)], no_warnings=False, logger=self.logger_var2)
+            update_options(format='best',outtmpl=f'{title}.{ext}',progress_hooks=[lambda d: self.update_progress(d,title)], no_warnings=False, logger=self.logger_var2, **ffmpeg_args)
         except Exception:
-            update_options(format='best',outtmpl=f'{title}.{ext}',progress_hooks=[lambda d: self.update_progress(d,title)], no_warnings=False)
+            update_options(format='best',outtmpl=f'{title}.{ext}',progress_hooks=[lambda d: self.update_progress(d,title)], no_warnings=False, **ffmpeg_args)
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             try:
                 ydl.download([url])
@@ -152,12 +146,21 @@ class DownloadWorker(QThread):
 
     def update_progress(self, d, title):
         if d['status'] == 'downloading':
-            total_size = d.get('total_bytes', None)
+            total_size = d.get('total_bytes', d.get('total_bytes_estimate', 0))
             downloaded_size = d.get('downloaded_bytes', 0)
-
-            if total_size:
+            
+            if d.get('fragment_index') is not None and d.get('fragment_count') is not None:
+                fragment_progress = (d['fragment_index'] / d['fragment_count']) * 100
+                self.progress_update.emit(title, int(fragment_progress))
+            elif total_size and total_size > 0:
                 percent = (downloaded_size / total_size) * 100
                 self.progress_update.emit(title, int(percent))
+            else:
+                if d.get('fragment_index') is not None and d.get('fragment_count') is not None:
+                    fragment_progress = (d['fragment_index'] / d['fragment_count']) * 100
+                    self.progress_update.emit(title, int(fragment_progress))
+        elif d['status'] == 'finished':
+            self.progress_update.emit(title, 100)
     
     def log_error(self, message):
         logs_directory = "logs"
@@ -171,16 +174,26 @@ class DownloadWorker(QThread):
 
 class Logger(QObject):
     messageSignal=pyqtSignal(str)
+    sleep_detected = pyqtSignal(str, int) # New signal: title, duration
 
     def debug(self,msg):
         self.messageSignal.emit(msg)
+        self._check_for_sleep_message(msg)
     
     def warning(self,msg):
         self.messageSignal.emit(msg)
+        self._check_for_sleep_message(msg)
     
     def error(self,msg):
         self.messageSignal.emit(msg)
+        self._check_for_sleep_message(msg)
 
+    def _check_for_sleep_message(self, msg):
+        match = re.search(r"^\[download\] Sleeping (\d+\.?\d*) seconds as required by the site\.\.\.", msg)
+        if match:
+            duration = int(float(match.group(1)))
+            # We'll use a placeholder for now, actual title will be handled in DownloadWorker
+            self.sleep_detected.emit("GLOBAL_SLEEP", duration)
 class ResultWindow(QWidget):
     def __init__(self,results):
         super().__init__()
@@ -193,6 +206,8 @@ class ResultWindow(QWidget):
         self.table.setRowCount(len(results))
         self.progress_bars = {}
         self.loggers = {}
+        self.sleep_timers = {}
+        self.current_sleep_durations = {}
         for row, (title, ext) in enumerate(results):
             #CheckBox Item Setup
             checkbox_item = QTableWidgetItem()
@@ -271,7 +286,49 @@ class ResultWindow(QWidget):
         self.worker=DownloadWorker(self.selected_videos,self.logger_var)
         self.worker.progress_update.connect(self.update_progress)
         self.worker.download_complete.connect(self.on_download_complete)
+        self.worker.sleep_for_item.connect(self.handle_sleep_countdown) # Connect new signal
         self.worker.start()
+
+    def handle_sleep_countdown(self, title, duration):
+        if title in self.sleep_timers and self.sleep_timers[title].isActive():
+            self.sleep_timers[title].stop()
+            del self.sleep_timers[title]
+            del self.current_sleep_durations[title]
+
+        progress_bar = self.progress_bars.get(title)
+        logger = self.loggers.get(title)
+        if progress_bar and logger:
+            progress_bar.setMaximum(duration)
+            progress_bar.setValue(duration) # Start at max for reverse progress
+            logger.clear()
+            logger.insertPlainText(f"Sleeping {duration} seconds...")
+
+            self.current_sleep_durations[title] = duration
+            timer = QTimer(self)
+            timer.timeout.connect(lambda: self._update_sleep_progress(title)) # Use lambda to pass title
+            timer.start(1000) # Update every second
+            self.sleep_timers[title] = timer
+
+    def _update_sleep_progress(self, title):
+        if title in self.current_sleep_durations:
+            remaining_time = self.current_sleep_durations[title] - 1
+            self.current_sleep_durations[title] = remaining_time
+
+            progress_bar = self.progress_bars.get(title)
+            logger = self.loggers.get(title)
+
+            if progress_bar and logger:
+                progress_bar.setValue(remaining_time)
+                logger.clear()
+                logger.insertPlainText(f"Sleeping {remaining_time} seconds...")
+
+                if remaining_time <= 0:
+                    self.sleep_timers[title].stop()
+                    del self.sleep_timers[title]
+                    del self.current_sleep_durations[title]
+                    progress_bar.setValue(0) # Reset to 0 after sleep
+                    logger.clear()
+                    logger.insertPlainText('Downloading...') # Or whatever the next status is
 
     def update_progress(self,title,percent):
         if title in self.progress_bars:
@@ -301,6 +358,8 @@ class MainWindow(QMainWindow):
         else:
             ui_file='frame.ui'
         uic.loadUi(ui_file,self)
+        if sys.platform == "win32":
+            ensure_ffmpeg_ready()
         self.pasteButton = self.findChild(QPushButton, 'pasteButton')
         self.entry = self.findChild(QLineEdit, 'entry')
         self.downloadText = self.findChild(QLabel, 'downloader')
@@ -308,9 +367,7 @@ class MainWindow(QMainWindow):
         self.downloadButton = self.findChild(QPushButton, 'downloadButton')
         self.searchButton = self.findChild(QPushButton, 'searchButton')
         self.toolButton = self.findChild(QToolButton, 'toolButton')
-        ##TODO - Remove after debug
-        self.entry.setText("https://www.youtube.com/watch?v=6rO6uRUrqwY")
-        #self.entry.setText(URL)
+        self.entry.setText(URL)
         self.downloadText.hide()
         self.downloadButton.hide()
         self.progressBar.hide()

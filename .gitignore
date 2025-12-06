@@ -4,3 +4,6 @@
 .clang-tidy
 *.mp3
 *.mp4
+build/*
+dist/*
+*.spec
