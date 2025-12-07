@@ -1,9 +1,10 @@
+import re
 import sys
 import os
 import yt_dlp
 import requests
+import py7zr
 from datetime import datetime
-from ffmpeg import ensure_ffmpeg_ready
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QPushButton, QProgressBar, QLabel, QLineEdit, QSlider, QCheckBox, QComboBox, QDoubleSpinBox,
     QMessageBox, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget, QToolButton, QSpinBox, QGraphicsView, QTextEdit
@@ -11,8 +12,6 @@ from PyQt6.QtWidgets import (
 from PyQt6 import uic, QtWidgets
 from PyQt6.QtGui import QPixmap
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QObject, QTimer
-import re
-import time
 
 
 URL = "https://youtu.be/jZhjqMMV1B4?si=QeTmdVjiTt-_xnuo"
@@ -26,6 +25,32 @@ ydl_opts = {
     'outtmpl': '%(title)s.%(ext)s',
     'quiet': True,
 }
+
+def ensure_ffmpeg_ready():
+    cwd = os.getcwd()
+    ffmpegExe = os.path.join(cwd, 'ffmpeg.exe')
+    if os.path.exists(ffmpegExe):
+        return
+    
+    if hasattr(sys,'_MEIPASS'):
+        archivePath = os.path.join(sys._MEIPASS, 'archive.7z')
+    else:
+        archivePath = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'archive.7z')
+    
+    if os.path.exists(archivePath):
+        try:
+            print("Extracting ffmpeg... this may take a moment.")
+            with py7zr.SevenZipFile(archivePath, mode='r') as archive:
+                archive.extractall(path=cwd)
+            print("Extraction Completed")
+        except Exception as e:
+            app_temp = QApplication(sys.argv)
+            QMessageBox.critical(None, "Extraction Error", f"Failed to unpack ffmpeg archive: {e}")
+            app_temp.quit()
+    else:
+        app_temp = QApplication(sys.argv)
+        QMessageBox.critical(None, "Missing Components", "ffmpeg.exe is missing or archive.7z was not found.")
+        sys.exit(1)
 
 def update_options(**kwargs):
     global ydl_opts
@@ -124,6 +149,24 @@ class AdvancedWindow(QWidget):
         labels = ["<=360p", "720p", "1080p", "Best"]
         index = current_value // 25
         self.qSliderLabel.setText(labels[index])
+
+class SearchWorker(QThread):
+    searchFinished = pyqtSignal(dict, bool) 
+    errorOccurred = pyqtSignal(str)
+
+    def __init__(self, url, options, isPlaylist):
+        super().__init__()
+        self.url = url
+        self.options = options
+        self.isPlaylist = isPlaylist
+
+    def run(self):
+        try:
+            with yt_dlp.YoutubeDL(self.options) as ydl:
+                info = ydl.extract_info(self.url, download=False)
+                self.searchFinished.emit(info, self.isPlaylist)
+        except Exception as e:
+            self.errorOccurred.emit(str(e))
 
 class DownloadWorker(QThread):
     progress_update=pyqtSignal(str,int)
@@ -384,8 +427,6 @@ class MainWindow(QMainWindow):
         else:
             ui_file='frame.ui'
         uic.loadUi(ui_file,self)
-        if sys.platform == "win32":
-            ensure_ffmpeg_ready()
         self.pasteButton = self.findChild(QPushButton, 'pasteButton')
         self.entry = self.findChild(QLineEdit, 'entry')
         self.downloadText = self.findChild(QLabel, 'downloader')
@@ -393,6 +434,12 @@ class MainWindow(QMainWindow):
         self.downloadButton = self.findChild(QPushButton, 'downloadButton')
         self.searchButton = self.findChild(QPushButton, 'searchButton')
         self.toolButton = self.findChild(QToolButton, 'toolButton')
+        self.logsText = self.findChild(QTextEdit, 'logsEdit')
+        self.logsText.setReadOnly(True)
+        self.logsText.setFixedHeight(100)
+        self.logsText.document().setMaximumBlockCount(1000)
+        self.loggerHandler = Logger()
+        self.loggerHandler.messageSignal.connect(self.logsText.append)
         self.entry.setText(URL)
         self.downloadText.hide()
         self.downloadButton.hide()
@@ -409,51 +456,66 @@ class MainWindow(QMainWindow):
         self.new_window.show()
 
     def search_video(self):
-        url=self.entry.text()
+        url = self.entry.text()
+        self.searchButton.setEnabled(False)
+        self.searchButton.setText("Searching...")
+        self.logsText.clear()
+        self.logsText.append("Fetching video information...")
+        if not url:
+            QMessageBox.warning(self, "Input Error", "Please Enter a Valid URL.")
+            self.reset_search_ui()
+            return
+        is_playlist = "playlist" in url or "list" in url
+        global ydl_opts
+        ydl_opts.clear()
+        if is_playlist:
+            update_options(force_generic_extractor=True, extract_flat=True, quiet=True, no_warnings=True)
+        else:
+            update_options(quiet=False, force_generic_extractor=True, extract_flat=True)
+        self.search_worker = SearchWorker(url, ydl_opts, is_playlist)
+        self.search_worker.searchFinished.connect(self.on_search_complete)
+        self.search_worker.errorOccurred.connect(self.on_search_error)
+        self.search_worker.start()
+    
+    def on_search_complete(self, info, is_playlist):
+        self.reset_search_ui()
+        self.logsText.append("Search Finished.")
         global video_info
         global extensions
+        global thumbnail_url
         video_info.clear()
         extensions.clear()
-        if not url:
-            QMessageBox.warning(self,"Input Error", "Please Enter a Valid URL.")
-            url=URL
-        
-        if "playlist" in url or "list" in url:
-            global ydl_opts
-            ydl_opts.clear()
-            update_options(force_generic_extractor=True, extract_flat=True, quiet=True, no_warnings=True)
-
-            try:
-                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                    info = ydl.extract_info(url,download=False)
-                    playlist_title=info['title']
-                    video_titles = [video['title'] for video in info['entries']]
-                    video_urls = [video['url'] for video in info['entries']]
-                
-                video_info.clear()
-                video_info={title:url for title, url in zip(video_titles,video_urls)}
-                results = [(title,"mp3") for title in video_titles]
+        try:
+            if is_playlist:
+                video_titles = [video['title'] for video in info['entries']]
+                video_urls = [video['url'] for video in info['entries']]
+                video_info = {title: url for title, url in zip(video_titles, video_urls)}
+                results = [(title, "mp3") for title in video_titles]
                 self.result_window = ResultWindow(results)
                 self.result_window.show()
-            except Exception as e:
-                print(f"Error Occurred: {e}")
-        else:
-            global thumbnail_url
-            ydl_opts.clear()
-            update_options(quiet=False,force_generic_extractor=True,extract_flat=True)
+                self.logsText.append(f"Found playlist with {len(results)} videos.")
+            else:
+                thumbnail_url = info.get('thumbnail')
+                title = info['title']
+                url = self.entry.text() 
+                extensions[title] = "music" not in url
+                video_info = {title: info['id']}
+                self.downloadButton.show()
+                self.downloadText.show()
+                self.toolButton.show()
+                self.downloadText.setText("Title - " + title)
+                self.logsText.append(f"Found video: {title}")
+        except Exception as e:
+            self.on_search_error(f"Error parsing results: {e}")
 
-            try:
-                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                    info=ydl.extract_info(url,download=False)
-                    thumbnail_url = info.get('thumbnail')
-                    extensions[info['title']] = "music" not in url
-                    video_info={info['title']: info['id']}
-                    self.downloadButton.show()
-                    self.downloadText.show()
-                    self.toolButton.show()
-                    self.downloadText.setText("Title - "+info['title'])
-            except Exception as e:
-                print(f"Error Occurred: {e}")
+    def on_search_error(self, error_msg):
+        self.reset_search_ui()
+        self.logsText.append(f"Search Error: {error_msg}")
+        QMessageBox.critical(self, "Search Error", f"An error occurred:\n{error_msg}")
+
+    def reset_search_ui(self):
+        self.searchButton.setEnabled(True)
+        self.searchButton.setText("Search")
 
     def paste_from_clipboard(self):
         clipboard=QApplication.clipboard()
@@ -464,16 +526,19 @@ class MainWindow(QMainWindow):
         self.progressBar.show()
         self.progressBar.setValue(0)
         self.downloadText.setText("Downloading...")
+        self.logsText.clear()
+        self.logsText.append("Starting Download\n")
         global video_info
         try:
-            self.worker=DownloadWorker(video_info)
+            self.worker=DownloadWorker(video_info, self.loggerHandler)
             self.worker.progress_update.connect(self.update_progress)
             self.worker.download_complete.connect(self.on_download_complete)
             self.worker.start()
         except Exception as e:
             print(f"ERROR: {e}")
+            self.logsText.append(f"ERROR: {e}")
     
-    def update_progress(self,title,percent):
+    def update_progress(self, title: str, percent: int) -> None:
         self.progressBar.setValue(percent)
     
     def on_download_complete(self):
@@ -484,6 +549,8 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self,"Error","Some error occurred while downloading file/s.\nPlease check logs")
 
 if __name__=="__main__":
+    if sys.platform == "win32":
+        ensure_ffmpeg_ready()
     app=QApplication(sys.argv)
     window=MainWindow()
     window.show()

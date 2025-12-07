@@ -2,4 +2,4 @@ yt-dlp
 PyQt6
 requests
 pyinstaller
-wget
+py7zr
