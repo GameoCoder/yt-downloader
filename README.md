@@ -1,117 +1,87 @@
+# PyQt6 YouTube Downloader
 
-# YouTube Video Downloader
+A modern, feature-rich GUI application to download videos and audio from YouTube. Built with Python and PyQt6, this tool offers a user-friendly experience for managing downloads, selecting quality, and handling playlists.
 
-This Python script allows you to download and merge the best quality video and audio from YouTube using `yt-dlp`. It automatically installs `yt-dlp` if it's not already installed on your system.
+> **Note:** This project is a GUI evolution of the CLI tool originally created by [AswinOp](https://github.com/AswinOp/yt-downloader).
 
-## Requirements
+## ✨ Features
 
-- Python 3.x
-- `ffmpeg` must be installed on your system for merging video and audio streams.
+  * **Modern GUI:** Clean interface built with PyQt6.
+  * **Smart Formatting:** Choose between Video (MP4) or Audio (MP3) with a single click.
+  * **Playlist Support:** Paste a playlist link to batch download videos.
+  * **Advanced Controls:**
+      * Select Video Quality (360p, 720p, 1080p, Best).
+      * Rate Limiting.
+      * Subtitle & Metadata extraction.
+  * **Portable Design:** capable of self-extracting necessary dependencies (FFmpeg) on the fly.
 
-### Installing `ffmpeg`
+## 🛠️ Prerequisites
 
-#### Windows
-1. Download `ffmpeg` from [FFmpeg's official site](https://ffmpeg.org/download.html).
-2. Extract the ZIP file and add the `bin` directory to your system's PATH environment variable.
+To run this application from source or build it, you need Python 3.x and the following libraries:
 
-#### macOS
-Install `ffmpeg` using Homebrew:
 ```bash
-brew install ffmpeg
+pip install -r requirements.txt
 ```
 
-#### Linux
-Install `ffmpeg` using your package manager. For example, on Ubuntu:
+## 🚀 How to Build (Create EXE)
+
+Because GitHub has file size limits, the required FFmpeg archive is hosted externally. Follow these steps to build a standalone `.exe` file that includes FFmpeg.
+
+### 1\. Clone the Repository
+
 ```bash
-sudo apt update
-sudo apt install ffmpeg
+git clone https://github.com/GameoCoder/yt-downloader.git
+cd yt-downloader
 ```
 
-## Usage
+### 2\. Download the FFmpeg Archive
 
-1. Clone this repository:
-   ```bash
-   git clone https://github.com/aswinop/yt-downloader.git
-   cd yt-downloader
-   ```
+To make the application portable, you must download the compressed FFmpeg archive.
 
-2. Run the script:
-   ```bash
-   python download_video.py
-   ```
+1.  **[Download archive.7z from Google Drive](https://drive.google.com/file/d/14PDvmx0n8QSubWT66a-e3dv4D7keAJGf/view?usp=sharing)**
+2.  Place the `archive.7z` file directly into the root folder of the project (where `download_pyqt6.py` is located).
 
-3. Select the method when prompted:
-   ```
-   Methods Available:-
-     1) Auto Detect
-     2) Download Youtube Video
-     3) Download Youtube Music
-     4) Advanced Options
+> **Why?** This archive contains `ffmpeg.exe`. The application is programmed to detect if FFmpeg is missing and automatically unzip this archive for the user on the first run.
 
-   Your Choice:
-   ```
+### 3\. Build with PyInstaller
 
-4. Enter the YouTube video/music URL when prompted:
-   ```
-   Enter the YouTube video URL: https://www.youtube.com/watch?v=your-video-id
-   ```
-   OR
-   ```
-   Enter the Youtube Music URL: https://music.youtube.com/watch?v=your-video-id
-   ```
+Run the following command to create the executable. This bundles the script, the UI files, and the 7-Zip archive into a single file.
 
-5. The script will download the best available video and audio streams, merge them, and save the file in the current directory.
-
-## For Playlists
-   1. Run the script:
-      ```
-      python download_video.py
-      ```
-   2. Select the "Auto Detect" method when prompted:
-      ```
-      Methods Available:-
-      1) Auto Detect
-      2) Download Youtube Video
-      3) Download Youtube Music
-      4) Advanced Options
-
-      Your Choice: 1
-      ```
-   3. Enter the playlist URL, when prompted:
-      ```
-      Enter the URL: https://music.youtube.com/playlist?list=your-playlist-id
-      ```
-   4. Enter serial numbers of videos to be downloaded, or "**all**" to download all:
-      ```
-      Available Music to download:  5
-
-      Select songs to download:
-      1. Test Video 1 (https://music.youtube.com/watch?v=test-video-1)
-      2. Test Video 2 (https://music.youtube.com/watch?v=test-video-2)
-      3. Test Video 3 (https://music.youtube.com/watch?v=test-video-3)
-      4. Test Video 4 (https://music.youtube.com/watch?v=test-video-4)
-      5. Test Video 5 (https://music.youtube.com/watch?v=test-video-5)
-
-      Enter song numbers (space-separated), or 'all' to download all:  
-      ```
-   5. Sit back and relax until your selected videos have been downloaded.
-      <p>The downloads are multi-threaded, so it would be pretty fast.</p>
-> Note: Youtube Music playlist links will ***only*** download files as mp3.
-
-
-## Example Output
-
-```
-yt-dlp is not installed. Installing now...
-[yt-dlp] Downloading video...
-Title: Example Video Title
-Download completed! File saved as Example Video Title.mp4
+```bash
+pyinstaller --noconfirm --onefile --windowed ^
+ --add-data "frame.ui;." ^
+ --add-data "advanced.ui;." ^
+ --add-data "archive.7z;." ^
+ download_pyqt6.py
 ```
 
-## Contributing
+*(Note: If you are on MacOS/Linux, replace the `^` with `\` and `;` with `:` in the command above).*
 
-Feel free to submit issues or pull requests to improve the script.
+The final executable will be located in the `dist/` folder.
 
-## License
+## 🏃 Running from Source
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+If you prefer to run the Python script directly without building an EXE:
+
+1.  Ensure you have `ffmpeg` installed on your system **OR** place the `archive.7z` (linked above) in the project folder.
+2.  Run the script:
+    ```bash
+    python download_pyqt6.py
+    ```
+
+## 📸 Usage
+
+1.  **Paste URL:** Copy a YouTube video or playlist URL and click "Paste".
+2.  **Search:** Click search to validate the link and fetch metadata.
+3.  **Download:**
+      * For **Single Videos**: Click "Download".
+      * For **Playlists**: A table will appear. Select the tracks you want, toggle between Audio/Video for specific tracks, and click "Download Selected".
+4.  **Advanced Options:** Click the generic settings icon (Tool Button) to adjust resolution caps, retries, or rate limits.
+
+## 📄 License
+
+This project is licensed under the MIT License - see the [LICENSE](https://github.com/GameoCoder/yt-downloader/blob/main/LICENSE) file for details.
+
+## 🤝 Contributing
+
+Feel free to submit issues or pull requests. Special thanks to AswinOp for the original CLI logic.
